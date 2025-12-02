@@ -72,45 +72,51 @@ def main():
     st.title("Camera Performance Comparison Dashboard 📸")
 
     # --- GOOGLE SHEET CONFIGURATION ---
-    # FHD_GID qiymatini to'g'ri GID bilan almashtiring:
-    # 1135908356 (Siz bergan linkdagi GID)
-    SHEET_ID = "1nEGhe-9xo2xpELhW1zvufvyN2vlEDnuXv9VlMPZmk4U"
-    FHD_GID = "1135908356" 
-    GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={FHD_GID}"
-
-
-    # FIX: O'zgaruvchilarni xavfsiz initsializatsiya qilish (Scope Xatosini Tuzatish)
-    df_raw = None
-    filtered_filenames = []
-    
-    st.sidebar.header("1. Data Upload (CSV/XLSX)")
-    
+    # GID va SHEET ID uchun so'ralgan input
     DEFAULT_FILE_PATH = 'data/data.xlsx'
+    df_raw = None
     
+    # Session state'ni boshlash
+    if 'data_source' not in st.session_state:
+         st.session_state['data_source'] = 'local'
+
+    # --- Sidebar Interaktiv Qismi ---
+    st.sidebar.header("1. Data Upload (CSV/XLSX)")
+
+    # 1. LOCAL FILE UPLOAD
     uploaded_file = st.sidebar.file_uploader(
         "Upload CSV/Excel file (Ensure correct column names)",
         type=['csv', 'xlsx']
     )
     
-    # Google Sheet tugmasi
+    # 2. GOOGLE SHEET INPUT (Manual Import)
     st.sidebar.markdown('---')
-    if st.sidebar.button("Load Data from Google Sheet (FHD)"):
+    st.sidebar.subheader("Manual Google Sheet Load")
+    
+    # DEFAULT QIymatlar
+    DEFAULT_SHEET_ID = "1nEGhe-9xo2xpELhW1zvufvyN2vlEDnuXv9VlMPZmk4U"
+    DEFAULT_FHD_GID = "1135908356" # FHD bo'limi uchun berilgan GID
+
+    sheet_id_input = st.sidebar.text_input("Enter Google Sheet ID", DEFAULT_SHEET_ID)
+    gid_input = st.sidebar.text_input("Enter GID (Sheet Tab ID)", DEFAULT_FHD_GID)
+    
+    GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id_input}/export?format=csv&gid={gid_input}"
+
+    if st.sidebar.button("Load Data from Google Sheet"):
         st.session_state['data_source'] = 'google'
+        # Google Sheet yuklanayotganda keshni tozalash
         analyze_and_get_metrics.clear()
         time.sleep(0.5)
         
-    if 'data_source' not in st.session_state:
-         st.session_state['data_source'] = 'local'
-         
     # --- Qaysi manbadan yuklashni aniqlash ---
     
     if st.session_state['data_source'] == 'google':
         try:
             df_raw = load_from_google_sheet(GOOGLE_SHEET_URL)
-            st.sidebar.success(f"Data loaded from Google Sheet (GID: {FHD_GID})")
+            st.sidebar.success(f"Data loaded from Google Sheet (GID: {gid_input})")
         except Exception as e:
             st.error(f"Failed to load data from Google Sheet: {e}")
-            st.info(f"Check the GID in config.py or try uploading locally.")
+            st.info(f"Please ensure the sheet is publicly shared and the GID is correct.")
             st.session_state['data_source'] = 'local'
             
     elif uploaded_file is None:
@@ -126,10 +132,8 @@ def main():
             except Exception as e:
                 st.error(f"Error loading default file: {e}. Check file type.")
                 st.exception(e)
-                # st.stop() o'rniga df_raw None bo'lib qoladi
         else:
              st.info(f"Please ensure your 'data/' folder contains the default file ({DEFAULT_FILE_PATH}) or upload a new file.")
-             # st.stop() o'rniga df_raw None bo'lib qoladi
         
     elif uploaded_file is not None:
         # User yuklagan fayl
@@ -156,10 +160,9 @@ def main():
     if not metrics:
         st.stop()
         
-    # --- Sidebar Filters (Va ularni yaratish) ---
+    # --- Dashboard Elements ---
     st.sidebar.header("2. Global Filters")
     
-    # selected_camera_filter yaratilishi
     selected_camera_filter = st.sidebar.multiselect(
         'Filter Data Display by Camera Type',
         options=CAMERAS,
@@ -167,12 +170,10 @@ def main():
         format_func=lambda x: x.upper()
     )
     
-    # filtered_filenames yaratilishi
     filtered_filenames = df_cleaned[df_cleaned[TRUE_FILENAME].notna()][TRUE_FILENAME].unique()
     st.sidebar.markdown('*(Note: Metrics are static based on full dataset)*')
 
-    # --- DASHBOARD CONTENT ---
-    
+    # Qolgan Dashboard qismlari (o'zgartirishsiz)
     st.header("1. Summary Performance Overview")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -198,7 +199,6 @@ def main():
     
     col_mae, col_bias, col_fps = st.columns(3)
 
-    # MAE Chart
     mae_data = pd.DataFrame([
         {'Camera': prefix.upper(), 'Value': metrics.get(f'{prefix}_mae_age', np.nan)}
         for prefix in CAMERAS
@@ -206,19 +206,16 @@ def main():
     with col_mae:
         plot_bar_chart(mae_data, 'Value', "Mean Absolute Error (MAE) [Years]")
 
-    # Global Bias Chart
     df_bias_global = df_bias_global.set_index('Camera').rename(columns={'Global Bias (Years)': 'Bias'}).sort_values(by='Bias')
     with col_bias:
         plot_bar_chart(df_bias_global, 'Bias', "Global Systematic Error (Bias) [Years]")
         
-    # FPS Chart
     df_fps = df_fps.set_index('Camera').rename(columns={'Average FPS': 'FPS'}).sort_values(by='FPS', ascending=False)
     with col_fps:
         plot_bar_chart(df_fps, 'FPS', "Average Frame Rate (FPS)")
 
     st.markdown("---")
     
-    # Age Segmentation
     st.subheader("2.1 Detailed Age Segmentation")
     if not df_segment.empty:
         col_seg_mae, col_seg_bias = st.columns(2)
@@ -231,7 +228,6 @@ def main():
 
     st.header("3. Gender Classification Metrics")
     
-    # Gender Metrics Table
     df_gender_metrics = pd.DataFrame([
         {'Camera': prefix.upper(), 'Precision': metrics.get(f'{prefix}_gender_male_precision'), 'Recall': metrics.get(f'{prefix}_gender_male_recall'), 'F1 Score': metrics.get(f'{prefix}_gender_male_f1_score'), 'Accuracy': metrics.get(f'{prefix}_gender_male_accuracy')}
         for prefix in CAMERAS
@@ -251,7 +247,6 @@ def main():
     
     col_count, col_worker = st.columns(2)
     
-    # Count Metrics Table
     df_count_metrics = pd.DataFrame([
         {'Camera': prefix.upper(), 'TP': metrics.get(f'{prefix}_count_tp'), 'FP': metrics.get(f'{prefix}_count_fp'), 'FN': metrics.get(f'{prefix}_count_fn'), 'Accuracy': metrics.get(f'{prefix}_count_accuracy')}
         for prefix in CAMERAS
@@ -259,7 +254,6 @@ def main():
     with col_count:
         plot_metrics_table(df_count_metrics, "Detection Accuracy (Count) Metrics")
     
-    # Worker Metrics Table
     df_worker_metrics = pd.DataFrame([
         {'Camera': prefix.upper(), 'Precision': metrics.get(f'{prefix}_worker_precision'), 'Recall': metrics.get(f'{prefix}_worker_recall'), 'F1 Score': metrics.get(f'{prefix}_worker_f1_score'), 'Accuracy': metrics.get(f'{prefix}_worker_accuracy')}
         for prefix in CAMERAS
