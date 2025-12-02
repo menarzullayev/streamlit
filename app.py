@@ -6,6 +6,7 @@ from io import StringIO, BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import time
 
 # Import custom files and modules
 from config import CAMERAS, TRUE_FILENAME, TRUE_AGE, COLOR_MAP_MAIN
@@ -29,15 +30,9 @@ def inject_full_width_css():
     st.markdown(
         """
         <style>
-        .main {
-            max-width: 1600px; 
-            padding-right: 2rem;
-            padding-left: 2rem;
-        }
+        .main { max-width: 1600px; padding-right: 2rem; padding-left: 2rem; }
         .st-emotion-cache-1g83s45, .st-emotion-cache-1jm692n, .st-emotion-cache-1v060j8 { 
-            max-width: 1600px !important; 
-            width: 100% !important;
-        }
+            max-width: 1600px !important; width: 100% !important; }
         </style>
         """,
         unsafe_allow_html=True
@@ -61,51 +56,92 @@ def analyze_and_get_metrics(df_raw: pd.DataFrame) -> tuple:
         logger.error(f"Analysis failed: {e}")
         raise
 
+@st.cache_data(ttl=600)
+def load_from_google_sheet(url):
+    try:
+        logger.info(f"Attempting to load data from Google Sheet URL: {url}")
+        df = pd.read_csv(url)
+        return df
+    except Exception as e:
+        logger.error(f"Failed to load Google Sheet: {e}")
+        raise Exception(f"Failed to load Google Sheet: {e}. Check if the GID is correct and the sheet is shared publicly for reading.")
+
 
 def main():
     inject_full_width_css() 
     st.title("Camera Performance Comparison Dashboard 📸")
 
-    # --- Data Loading Logic ---
+    # --- GOOGLE SHEET CONFIGURATION ---
+    # FHD_GID qiymatini to'g'ri GID bilan almashtiring:
+    # 1135908356 (Siz bergan linkdagi GID)
+    SHEET_ID = "1nEGhe-9xo2xpELhW1zvufvyN2vlEDnuXv9VlMPZmk4U"
+    FHD_GID = "1135908356" 
+    GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={FHD_GID}"
+
+
+    # FIX: O'zgaruvchilarni xavfsiz initsializatsiya qilish (Scope Xatosini Tuzatish)
+    df_raw = None
+    filtered_filenames = []
+    
     st.sidebar.header("1. Data Upload (CSV/XLSX)")
     
     DEFAULT_FILE_PATH = 'data/data.xlsx'
-    df_raw = None
     
     uploaded_file = st.sidebar.file_uploader(
         "Upload CSV/Excel file (Ensure correct column names)",
         type=['csv', 'xlsx']
     )
-
-    if uploaded_file is None:
-        # Avtomatik yuklash mantiği
+    
+    # Google Sheet tugmasi
+    st.sidebar.markdown('---')
+    if st.sidebar.button("Load Data from Google Sheet (FHD)"):
+        st.session_state['data_source'] = 'google'
+        analyze_and_get_metrics.clear()
+        time.sleep(0.5)
+        
+    if 'data_source' not in st.session_state:
+         st.session_state['data_source'] = 'local'
+         
+    # --- Qaysi manbadan yuklashni aniqlash ---
+    
+    if st.session_state['data_source'] == 'google':
+        try:
+            df_raw = load_from_google_sheet(GOOGLE_SHEET_URL)
+            st.sidebar.success(f"Data loaded from Google Sheet (GID: {FHD_GID})")
+        except Exception as e:
+            st.error(f"Failed to load data from Google Sheet: {e}")
+            st.info(f"Check the GID in config.py or try uploading locally.")
+            st.session_state['data_source'] = 'local'
+            
+    elif uploaded_file is None:
+        # Avtomatik yuklash mantiği (Local file)
         if os.path.exists(DEFAULT_FILE_PATH):
             try:
-                # Agar fayl nomi .xlsx bo'lsa, read_excel dan foydalanish kerak (TUZATISH)
-                if DEFAULT_FILE_PATH.endswith('.xlsx') or DEFAULT_FILE_PATH.endswith('.xls'):
+                if DEFAULT_FILE_PATH.endswith(('.xlsx', '.xls')):
                     df_raw = pd.read_excel(DEFAULT_FILE_PATH)
                 else:
                     df_raw = pd.read_csv(DEFAULT_FILE_PATH)
                     
                 st.sidebar.success(f"Default file loaded automatically from {DEFAULT_FILE_PATH}")
             except Exception as e:
-                st.error(f"Error loading default file: {e}. If it is an Excel file, ensure 'openpyxl' is installed.")
+                st.error(f"Error loading default file: {e}. Check file type.")
                 st.exception(e)
-                st.stop()
+                # st.stop() o'rniga df_raw None bo'lib qoladi
         else:
              st.info(f"Please ensure your 'data/' folder contains the default file ({DEFAULT_FILE_PATH}) or upload a new file.")
-             st.stop() 
+             # st.stop() o'rniga df_raw None bo'lib qoladi
         
-    else:
+    elif uploaded_file is not None:
+        # User yuklagan fayl
         if uploaded_file.name.endswith('.csv'):
             df_raw = pd.read_csv(uploaded_file)
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
             df_raw = pd.read_excel(uploaded_file)
-        else:
-            st.error("Unsupported file type. Please upload a CSV or XLSX file.")
-            st.stop()
             
     # --- Data Processing and Metrics Calculation ---
+    if df_raw is None:
+        st.stop()
+        
     analyze_and_get_metrics.clear()
     
     try:
@@ -120,9 +156,10 @@ def main():
     if not metrics:
         st.stop()
         
-    # --- Sidebar Filters ---
+    # --- Sidebar Filters (Va ularni yaratish) ---
     st.sidebar.header("2. Global Filters")
     
+    # selected_camera_filter yaratilishi
     selected_camera_filter = st.sidebar.multiselect(
         'Filter Data Display by Camera Type',
         options=CAMERAS,
@@ -130,6 +167,7 @@ def main():
         format_func=lambda x: x.upper()
     )
     
+    # filtered_filenames yaratilishi
     filtered_filenames = df_cleaned[df_cleaned[TRUE_FILENAME].notna()][TRUE_FILENAME].unique()
     st.sidebar.markdown('*(Note: Metrics are static based on full dataset)*')
 
@@ -150,7 +188,7 @@ def main():
     with col2:
         st.metric(label="Best Age MAE Camera", value=best_mae_camera, delta=f"Min MAE: {min(mae_values.values()):.2f}" if mae_values else None)
     with col3:
-        st.metric(label="Best Detection Accuracy", value=best_count_acc, delta=f"Acc: {max(count_acc_values.values()):.2f}" if count_acc_values else None)
+        st.metric(label="Best Detection Accuracy", value=best_count_acc, delta=f"Acc: {max(count_acc_values.values()):.2f}" if count_acc_values else 'N/A')
     with col4:
         st.metric(label="Total Worker Records (GT)", value=df_cleaned['worker_gt'].sum() if 'worker_gt' in df_cleaned.columns else 'N/A')
 
