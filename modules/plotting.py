@@ -4,15 +4,18 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-from config import COLOR_MAP_MAIN, CAMERAS, TRUE_FILENAME, TRUE_AGE, AGE_LABELS
+from config import COLOR_MAP_MAIN, CAMERAS, TRUE_FILENAME, TRUE_AGE
 
 
 def plot_metrics_table(df_metrics: pd.DataFrame, title: str):
+    """Jadvallarni chiqarish uchun yordamchi funksiya."""
     st.subheader(title)
-    st.dataframe(df_metrics.style.format('{:.3f}'))
+    # StreamlitInvalidWidthError xatosi tuzatildi
+    st.dataframe(df_metrics.style.format('{:.3f}'), width='stretch')
 
 
 def plot_bar_chart(df_data: pd.DataFrame, y_col: str, title: str, color_col='Camera'):
+    """MAE va Accuracy kabi metrikalar uchun bar chart."""
     df_plot = df_data.copy().reset_index().rename(columns={'index': 'Camera', y_col: 'Value'})
     
     fig = px.bar(
@@ -26,10 +29,11 @@ def plot_bar_chart(df_data: pd.DataFrame, y_col: str, title: str, color_col='Cam
         text_auto='.2f'
     )
     fig.update_layout(showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def plot_confusion_matrix(metrics: dict, camera: str, metric_type: str):
+    """Confusion Matrix (Chalkashlik Matritsasi) grafikini chizish."""
     tp = metrics.get(f'{camera}_{metric_type}_tp', 0)
     tn = metrics.get(f'{camera}_{metric_type}_tn', 0)
     fp = metrics.get(f'{camera}_{metric_type}_fp', 0)
@@ -56,15 +60,15 @@ def plot_confusion_matrix(metrics: dict, camera: str, metric_type: str):
         height=350,
         margin=dict(t=50, b=20, l=20, r=20)
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def plot_age_segment_bias(df_segment: pd.DataFrame, chart_type='MAE'):
+    """Yosh segmentlari bo'yicha MAE va Bias grafikini chizish."""
     
     df_plot = df_segment.rename(columns={'Age Group': 'Group', chart_type: 'Value'})
     
     if chart_type == 'Bias (Mean Error)':
-        # Xato chizig'ini qo'shish (0 qiymat)
         fig = px.bar(
             df_plot, x='Group', y='Value', color='Camera',
             title=f'{chart_type} by Age Group (Positive=Overestimate)',
@@ -78,10 +82,11 @@ def plot_age_segment_bias(df_segment: pd.DataFrame, chart_type='MAE'):
             template="plotly_white", barmode='group', color_discrete_map=COLOR_MAP_MAIN, height=400
         )
         
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def plot_individual_detection_comparison_chart(df: pd.DataFrame):
+    """Individual deteksiyalarni taqqoslash grafikini chizish (siz so'ragan tartibda)."""
     
     st.subheader("Age Prediction vs Ground Truth (Per Record)")
 
@@ -116,13 +121,12 @@ def plot_individual_detection_comparison_chart(df: pd.DataFrame):
 
     # 2. Kameralar Prognozlari (barcha deteksiyalarni qo'shish)
     for prefix in CAMERAS:
-        df_cam = df_person[[f'{prefix}_age']].copy()
+        df_cam = df_person[[f'{prefix}_age']].copy().reset_index(drop=True)
         df_cam.columns = ['Age']
         df_cam['Detection ID'] = detection_ids
         df_cam['Source'] = prefix.upper()
         
-        # X-Labelni to'g'ri tartiblash uchun alohida ustun yaratish
-        df_cam['X-Label'] = [f"{prefix.upper()} {id_}" for id_ in detection_ids]
+        df_cam['X-Label'] = [f"{prefix.upper()} D{i+1}" for i in range(total_detections)]
         df_melt_list.append(df_cam)
 
     df_final_plot = pd.concat(df_melt_list, ignore_index=True)
@@ -140,7 +144,6 @@ def plot_individual_detection_comparison_chart(df: pd.DataFrame):
         color='Source',
         title=f"Age Prognozi: {selected_filename} (Barcha {total_detections} Deteksiyalar)",
         template="plotly_white",
-        barmode='group', # Grouped barmode faqat X-o'qidagi ustunlarni guruhlashda muhim, bu yerda Source'ga rang beriladi
         height=500,
         color_discrete_map=COLOR_MAP_MAIN,
         text='Age',
@@ -149,10 +152,11 @@ def plot_individual_detection_comparison_chart(df: pd.DataFrame):
     
     fig_age.update_traces(texttemplate='%{text:.1f}', textposition='outside')
     fig_age.update_xaxes(tickangle=90) 
-    st.plotly_chart(fig_age, use_container_width=True)
+    st.plotly_chart(fig_age, width='stretch')
 
 
 def plot_worker_score_comparison(df_person: pd.DataFrame, selected_filename: str):
+    """Tanlangan shaxs uchun Worker Similarity Score grafikini chizish."""
     
     worker_score_cols = [
         'v201_score_mansb', 'v201_score_saidak', 
@@ -186,5 +190,4 @@ def plot_worker_score_comparison(df_person: pd.DataFrame, selected_filename: str
         height=550,
         color_discrete_map=COLOR_MAP_MAIN
     )
-    fig_scores.update_xaxes(title="Deteksiya ID") 
-    st.plotly_chart(fig_scores, use_container_width=True)
+    st.plotly_chart(fig_scores, width='stretch')
